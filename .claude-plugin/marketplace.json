@@ -1,0 +1,12 @@
+{
+    "name": "cloudbees",
+    "owner": {
+        "name": "CloudBees, Inc.",
+        "email": "engineering@cloudbees.com"
+    },
+    "plugins": [],
+    "metadata": {
+        "description": "Agent skills to use CloudBees products effectively",
+        "version": "0.1"
+    }
+}
