@@ -10,3 +10,14 @@ For other agents, use [the skills CLI](https://skills.sh/) from your terminal:
 ```
 npx skills add cloudbees-oss/agent-skills
 ```
+
+## Update
+Claude Code users can run the following slash command:
+```
+/plugin marketplace update cloudbees
+```
+
+For other agents:
+```
+npx skills update
+```
