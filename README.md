@@ -21,3 +21,9 @@ For other agents:
 ```
 npx skills update
 ```
+
+# Contributing
+External contributions welcome.
+
+CloudBees employees who are interested in working on this,
+please see [this](https://cloudbees.atlassian.net/wiki/x/EAAWcwE).
