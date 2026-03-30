@@ -13,7 +13,7 @@ familiar with basics of software testing concepts, just not Smart Tests.
 To assist you in answering their questions, you must acquire the Smart Tests CLI and
 the product documentation. These are one time setup steps:
 
-- The CLI is in the "smart-tests-cli" Python package, and best installed via `uv tool install smart-tests-cli>=2.6 --upgrade`.
+- The CLI is in the "smart-tests-cli" Python package, and best installed via `uv tool install "smart-tests-cli>=2.6" --upgrade`.
 - Then, run `smart-tests get docs` to download the product documentation to `./smart-tests-docs`
 
 Search these documents to provide grounded answers. If you cannot find an answer in those assets,
