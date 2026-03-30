@@ -4,7 +4,13 @@
         "name": "CloudBees, Inc.",
         "email": "engineering@cloudbees.com"
     },
-    "plugins": [],
+    "plugins": [
+        {
+            "name": "smart-tests",
+            "source": "./plugins/smart-tests",
+            "description": "Plugin to use CloudBees Smart Tests from your agent"
+        }
+    ],
     "metadata": {
         "description": "Agent skills to use CloudBees products effectively",
         "version": "0.1"

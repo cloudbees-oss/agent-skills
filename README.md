@@ -1,5 +1,9 @@
 # CloudBees agent skills
 
+This repository hosts [agent skills](https://agentskills.io/home) / [Claude Code plugins](https://code.claude.com/docs/en/discover-plugins) for using CloudBees products through AI agents.
+
+* [Smart Tests](plugins/smart-tests/README.md)
+
 ## Installation
 Claude Code users can run the following slash command:
 ```
