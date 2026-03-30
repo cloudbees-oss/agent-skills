@@ -1,0 +1,8 @@
+{
+  "name": "smart-tests",
+  "description": "Plugin to use CloudBees Smart Tests from your agent",
+  "version": "1.0.0",
+  "author": {
+    "name": "CloudBees"
+  }
+}
