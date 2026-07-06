@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assess Smart Tests Fit"
+  short_description: "Assess whether Smart Tests can help CI"
+  default_prompt: "Use $assess-adoption-fit to evaluate whether this repository is a good fit for CloudBees Smart Tests."
