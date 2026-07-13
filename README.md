@@ -31,3 +31,6 @@ External contributions welcome.
 
 CloudBees employees who are interested in working on this,
 please see [this](https://cloudbees.atlassian.net/wiki/x/EAAWcwE).
+
+## Acknowledgements
+The `flaky-tests` skill builds on the foundational work by [@hsbt](https://github.com/hsbt) in [#2](https://github.com/cloudbees-oss/agent-skills/pull/2).
