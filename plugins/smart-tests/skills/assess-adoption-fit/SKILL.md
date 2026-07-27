@@ -1,6 +1,6 @@
 ---
 name: assess-adoption-fit
-description: Assess whether a target project directory is a good candidate for CloudBees Smart Tests based on CI configuration and recent CI behavior. Use when a user asks whether Smart Tests is likely to help, whether a repository or directory is suitable for Smart Tests adoption, or asks to evaluate CI duration, flaky test reruns, rerun frequency, GitHub Actions, AWS CodeBuild, Jenkins, buildspec, Jenkinsfile, or workflow evidence for Smart Tests value.
+description: Assess whether a target project directory is a good candidate for CloudBees Smart Tests based on CI configuration and recent CI behavior. Use when a user asks whether Smart Tests is likely to help, whether a repository or directory is suitable for Smart Tests adoption, or asks to evaluate CI duration, flaky test reruns, rerun frequency, GitHub Actions, AWS CodeBuild, Jenkins, Screwdriver.cd, buildspec, Jenkinsfile, or workflow evidence for Smart Tests value.
 ---
 
 ## Overview
@@ -21,11 +21,14 @@ Default to a 30-day lookback. If there are fewer than 10 relevant CI runs, also 
    - GitHub Actions: `.github/workflows/*.yml` and `.github/workflows/*.yaml`.
    - AWS CodeBuild: `buildspec.yml`, `buildspec.yaml`, `.aws/codebuild`, CloudFormation/Terraform/CDK references to `AWS::CodeBuild::Project` or `aws_codebuild_project`.
    - Jenkins: `Jenkinsfile`, `jenkinsfile`, `.jenkins`, or pipeline library references.
+   - Screwdriver.cd: `screwdriver.yaml`, `screwdriver.yml`, `.screwdriver.yaml`, `.screwdriver.yml`, `.sd.yaml`, `.sd.yml`, or nested `*/screwdriver.yaml` files.
    - If multiple providers exist, assess each and then combine the evidence.
 
 3. Collect recent CI history when credentials and APIs are available.
    - Do not ask the user for credentials until local detection is complete.
    - Prefer read-only CLI/API calls.
+   - When Screwdriver.cd configuration is detected, check `SD_API_BASE` and `SD_API_TOKEN` before making any Screwdriver API request. If either variable is unset or empty, pause remote history collection and first prompt the user to set the missing variable(s). Do not make unauthenticated API calls or conclude `Unknown` solely because these variables have not been configured yet.
+   - For providers that create per-PR, per-event, or per-matrix job instances, inventory all applicable job identities before querying a single job's history. A static job ID from a pipeline definition is not necessarily the job ID used by historical PR or matrix runs.
    - If remote history is unavailable, use local CI definitions plus any logs or run summaries the user provided, and return `Unknown` rather than guessing.
 
 4. Measure serial CI waiting time.
@@ -118,6 +121,107 @@ Match Jenkins jobs to the target directory by:
 
 Jenkins `duration` is wall-clock build duration. Use stage timing if available to distinguish test time from unrelated deploy or packaging stages.
 
+### Screwdriver.cd
+
+Detect Screwdriver from local pipeline files before asking for API access. Read root and nested pipeline files because monorepos can have separate pipelines for subdirectories.
+
+Before using the Screwdriver API, verify that both required environment variables are non-empty:
+
+```bash
+# Configure these through a secret-safe mechanism; do not paste tokens into shell history.
+: "${SD_API_BASE:?Set SD_API_BASE to your Screwdriver API base URL}"
+: "${SD_API_TOKEN:?Set SD_API_TOKEN through a secret-safe mechanism}"
+```
+
+If `SD_API_BASE` or `SD_API_TOKEN` is unset or empty, stop and prompt the user to set it before continuing. Show the setup example, identify which variable is missing, and do not print or echo the token. Do not substitute unrelated credentials such as `LAUNCHABLE_API_KEY` for `SD_API_TOKEN`. Re-check the environment after the user sets the value(s), then continue with the read-only API calls below. Do not put a real token in an `export` command, command-line argument, or log.
+
+Common files:
+
+```bash
+rg --files --hidden -g 'screwdriver*.yml' -g 'screwdriver*.yaml' -g '.screwdriver*.yml' -g '.screwdriver*.yaml' -g '.sd*.yml' -g '.sd*.yaml'
+```
+
+Identify relevant jobs by:
+
+- `requires` triggers such as `~pr`, `~pr:<branch>`, `~commit`, branch regexes, and scheduled annotations such as `screwdriver.cd/buildPeriodically` or `build_periodically`.
+- `sourcePaths`, nested pipeline file location, or job commands that restrict the job to the target directory.
+- Test templates such as `java-gradle/test`, `nodejs/test`, or explicit test commands in `steps`.
+- Environment variables such as `GRADLE_TASK`, `NPM_SCRIPT`, `SD_TEMPLATE_FULLNAME`, or other test task selectors.
+
+Use the Screwdriver API only when a token is already configured or the user provides one. Do not print token values. A typical setup is:
+
+```bash
+: "${SD_API_BASE:?Set SD_API_BASE to your Screwdriver API base URL}"
+: "${SD_API_TOKEN:?Set SD_API_TOKEN through a secret-safe mechanism}"
+: "${PIPELINE_ID:?Set PIPELINE_ID for the target pipeline}"
+```
+
+Authenticate by exchanging the user or pipeline token for a JWT:
+
+```bash
+SD_JWT="$(
+  printf 'header = "Authorization: Bearer %s"\n' "$SD_API_TOKEN" |
+    curl -fsS --config - "$SD_API_BASE/auth/token" |
+    jq -er '.token'
+)"
+: "${SD_JWT:?Screwdriver authentication did not return a token}"
+```
+
+The command above captures the returned `.token` without printing it. Keep the token in the current shell rather than exporting it when possible. Use this helper so bearer tokens are supplied through curl's config input instead of appearing in process arguments:
+
+```bash
+sd_curl() {
+  printf 'header = "Authorization: Bearer %s"\n' "$SD_JWT" |
+    curl -fsS --config - "$@"
+}
+
+sd_curl "$SD_API_BASE/openapi.json"
+sd_curl "$SD_API_BASE/pipelines/$PIPELINE_ID/events?type=pr"
+sd_curl "$SD_API_BASE/events/<event-id>/builds"
+sd_curl "$SD_API_BASE/pipelines/$PIPELINE_ID/builds?count=50&page=1&sortBy=createTime&sort=descending&fetchSteps=true"
+sd_curl "$SD_API_BASE/builds/<build-id>/steps/<step-name>/logs"
+```
+
+#### Mandatory Screwdriver PR build discovery
+
+Apply this procedure before reporting that a PR test job has zero runs. Treat a zero result from a fixed `/jobs/{id}/builds` query as incomplete until every step below is complete.
+
+1. Build the candidate job inventory. Start with static job IDs from the pipeline workflow graph, then add every dynamic job ID discovered from PR/event workflow graphs or build metadata. For a test job named `pr_test`, the candidate set must include job names such as `pr_test` and `PR-1234:pr_test`, not only one numeric ID.
+2. Use `/pipelines/{id}/builds` as the historical PR-build inventory. Request at most 50 records per page, sort newest-first, and continue pagination until the oldest `createTime`/`endTime` is older than the lookback boundary or the API returns no more records. Ordinary `/pipelines/{id}/events` results are supplemental because PR events may be absent there.
+3. Filter the inventory by `meta.build.jobName` when that field is present and retain `eventId`, `jobId`, `sha`, `createTime`, `startTime`, `endTime`, and `status`. For example, identify unit-test builds with a suffix match such as `endswith(":pr_test")`; do not filter only by the static numeric job ID. If `meta.build.jobName` is absent, resolve the `jobId` through `/jobs/{jobId}` and the workflow graph or job definitions, and do not discard the build solely because the nested field is missing. If no reliable mapping is possible, report collection as incomplete.
+4. For each discovered PR `eventId`, query `/events/{event-id}/builds` and merge the results by build ID. Use the event-level response to recover parallel jobs and the event-specific dynamic job IDs. A UI URL such as `/v2/pipelines/{id}/pulls/{event-id}` is not itself an API contract; confirm the ID with `/v4/events/{event-id}` and use the documented v4 endpoints.
+5. Use `/jobs/{id}/builds` only as a detail or cross-check after the candidate IDs are known. An empty response for the static pipeline job does not prove that no PR build ran.
+
+Do not report zero PR runs for `pr_test` unless all of the following are true:
+
+- pipeline-build pagination was exhausted: the oldest record passed the lookback boundary or the API returned no more records; record an empty response and page count when no records were returned;
+- the `meta.build.jobName` PR suffix filter was applied where the field exists, and fallback `jobId`/workflow mapping was attempted for records without it;
+- dynamic PR/event job IDs and event build lists were checked;
+- each candidate build had a usable timestamp comparison against the lookback window; and
+- no eligible build was found.
+
+If any condition is incomplete, report `Unknown` or `collection incomplete`, identify the missing source, and do not convert an empty fixed-job response into a zero count.
+
+Record collection coverage in the evidence: endpoints queried, page count, oldest record examined, job-name filter, static and dynamic job IDs, and raw versus eligible build counts.
+
+For Screwdriver duration:
+
+- For a single build, use `endTime - startTime`.
+- For a PR or commit gate, group builds by `eventId` when available. Use the earliest relevant build `startTime` and latest relevant build `endTime`.
+- If `eventId` is missing or not sufficient, use `sha` plus the PR number parsed from `meta.build.jobName` only to find related candidates. Preserve each build/event boundary and do not aggregate records solely on that pair; report collection as incomplete if no reliable gate grouping exists.
+- For Smart Tests impact, separately compute the critical path of test builds or test steps. Identify test builds through local pipeline template names such as `java-gradle/test` or `nodejs/test`, or map numeric API `templateId` values through the workflow/job definitions before classifying them. Then compute earliest test start to latest test completion per event.
+- Do not sum parallel Screwdriver job durations as the primary metric.
+- If the long wall-clock time is in deploy, package, artifact upload, cache, Snyk, or teardown steps rather than test steps, report that Smart Tests may not reduce the bottleneck.
+
+Screwdriver rerun and flakiness evidence:
+
+- Repeated PR events for the same `sha`, or repeated builds for the same `PR-<number>:<job>` and `sha`, are candidate repeated executions; inspect the event creator, trigger, PR number, and retry/attempt metadata before labeling them as reruns.
+- A repeated build for the same event/job is explicit rerun evidence only when the API exposes distinct attempts or a retry marker. Otherwise, preserve the event/job/build IDs and classify it as ordinary repeated execution or likely rerun based on the available trigger evidence.
+- Keep explicit rerun, likely rerun, and ordinary repeated execution as separate labels; do not call different event IDs with the same SHA explicit reruns without supporting trigger evidence.
+- A failed build followed by a successful build for the same PR/job or same `sha` is likely rerun/flaky evidence; label it as likely unless logs explicitly identify a flaky test or retry.
+- Search logs and local config for retry signals, but distinguish real test retry output from unrelated release-note text containing words such as `rerun`.
+- Timeout failures, for example a fixed CI timeout repeated across runs, are waste signals, but do not label them flaky without supporting evidence.
+
 ## Decision Rules
 
 Return one of these decisions:
@@ -156,6 +260,7 @@ Evidence:
 - Provider/workflow/build/job: ...
 - Lookback window: ...
 - Commands or data sources used: ...
+- For Screwdriver.cd: collection coverage: endpoints, pages, oldest record, filters, candidate job IDs, and raw/eligible counts. If a count is zero, state which zero-count conditions were verified.
 
 Reasons value may be limited:
 - ...
