@@ -103,13 +103,30 @@ For projects with many builds, read build IDs newest-first, fetch details with `
 
 ### Jenkins
 
-Use Jenkins API only when `JENKINS_URL` and credentials are already configured or the user supplies them. Otherwise, inspect local Jenkinsfiles and ask for run history or logs only if needed.
+Before making any Jenkins API request, complete this authentication gate:
 
-Useful API patterns:
+1. Resolve the authentication mode from explicit user instructions or configured environment variables. A Jenkins URL alone, or a token variable name alone, is not authorization to probe the endpoint.
+2. If no Jenkins credentials are supplied or configured, pause and ask the user either to provide read-only credentials or to confirm that unauthenticated access is allowed. Do not try an unauthenticated request first. If the user does not confirm either option, inspect local Jenkinsfiles and report remote history as unavailable; do not treat an anonymous 401/403 probe as a completed assessment.
+3. If a token is available but the Jenkins username is missing, ask the user for the username before authenticating. Do not silently infer it from `whoami`, a local email, Git author, job owner, or prior context. If proposing a likely username, show only that non-secret value and obtain explicit confirmation before using it with the token.
+4. A non-empty, explicitly configured username from either `JENKINS_USER` or `JENKINS_USERNAME`, together with `JENKINS_USER_TOKEN`, may be used without an additional prompt. Never print, echo, log, or place the token in a URL or command-line argument.
+
+After the gate is satisfied, use read-only Jenkins API calls. Keep Basic-auth material out of process arguments where possible, for example:
 
 ```bash
-curl "$JENKINS_URL/job/<job>/api/json?tree=builds[number,result,duration,timestamp,url,actions[parameters[name,value]]]"
-curl "$JENKINS_URL/job/<job>/<build>/api/json"
+jenkins_curl() {
+  local jenkins_user="${JENKINS_USER:-${JENKINS_USERNAME:-}}"
+  printf 'user = "%s:%s"\n' "$jenkins_user" "$JENKINS_USER_TOKEN" |
+    curl -fsS --config - "$@"
+}
+```
+
+Record the authentication mode and whether the user confirmed it in the evidence, but never record the token or other secret values.
+
+Useful API patterns for authenticated mode:
+
+```bash
+jenkins_curl "$JENKINS_URL/job/<job>/api/json?tree=builds[number,result,duration,timestamp,url,actions[parameters[name,value]]]"
+jenkins_curl "$JENKINS_URL/job/<job>/<build>/api/json"
 ```
 
 Match Jenkins jobs to the target directory by:
