@@ -22,7 +22,6 @@ This skill uses only the `smart-tests` (v2) or `launchable` (v1) CLI — no data
 |-----------|-------------|
 | **Test path mismatch** | The test paths sent during `subset` differ in format from those sent during `record tests` |
 | **NO_TESTS_EXECUTED** | No test results were recorded for the session |
-| **TOO_MANY_SUBSETTINGS** | 100+ subset requests were made for a single test session |
 | **NO_COMMIT_HISTORY** | No commit history was available when recording the build (PTS v1 only) |
 | **Unrecorded subset/remainder tests** | More than 5% of subset or remainder test paths were not found in recorded results |
 | **Extra tests recorded** | More than 5% of recorded tests were not in any subset request (observation mode) |
@@ -49,11 +48,11 @@ If `verify` fails with an authentication error, the user needs to set up a token
 
 1. Go to the Smart Tests web app → **Settings** → **API Keys**
 2. Generate a new token
-3. Set it in the CLI:
+3. Set it as an environment variable:
    ```sh
-   smart-tests config set --token <TOKEN>
+   export SMART_TESTS_TOKEN=<TOKEN>
    # or for v1:
-   launchable config set --token <TOKEN>
+   export LAUNCHABLE_TOKEN=<TOKEN>
    ```
 
 `jq` must be available for parsing CLI output:
@@ -68,15 +67,24 @@ Collect the following from the user before starting diagnosis:
 
 ### Test Session ID
 
-The numeric ID shown in the web app:
-- In the URL: `https://app.smart-tests.com/.../test-sessions/6909578`
-- In the session detail page header: `Test session #6909578`
+The numeric ID shown in the web app. Ask the user to copy the URL from their browser — the last numeric segment is the test session ID:
+
+- `https://app.launchableinc.com/organizations/<ORG>/workspaces/<WS>/.../test-sessions/6909578` → **6909578**
+- `https://cloudbees.io/<ORG>/smart-tests/.../test-sessions/6909578` → **6909578**
+- Also shown in the session detail page header: `Test session #6909578`
+
+If the user doesn't know their organization or workspace name, `smart-tests verify` shows them:
+
+```sh
+smart-tests verify
+# Output includes: Organization: '...' and Workspace: '...'
+```
 
 ### Subset ID
 
 Found in one of these places:
 - The output of the `smart-tests subset` command: `Run smart-tests inspect subset --subset-id 26876 to view full subset details`
-- The web app Analyze page for the test session
+- The web app Analyze page: in the "Predictive Test Selection" section, the "in request" number shown in the Request row is the subset ID
 
 ### Additional Context
 
@@ -147,14 +155,6 @@ Compare the paths from Phase 2 (subset request) with the paths from this step (r
 | Different test runner profile | `file=tests/test_login.py` | `class=test_login#testcase=test_auth` |
 
 If a pattern is identified, proceed to Phase 4 for the fix.
-
-If the user does not have a subset ID but does have the test session ID, use audit logging on a fresh subset run to capture the request paths:
-
-```sh
-smart-tests --log-level audit subset <TESTRUNNER> --build <BUILD> --session <SESSION> --dry-run <TEST_PATHS>
-```
-
-The `--dry-run` flag prevents any data from being sent to the server.
 
 ## Phase 4: Diagnose and Fix
 
@@ -233,22 +233,7 @@ Also verify:
 - The `--session` name matches between `subset` and `record tests`
 - Test report files (JUnit XML, etc.) exist and are not empty when `record tests` runs
 
-### Root Cause C: Too Many Subsettings (`TOO_MANY_SUBSETTINGS`)
-
-100 or more subset requests were made for a single test session. This happens when `smart-tests subset`
-is called in a loop (once per test file) instead of once for the entire suite.
-
-**Fix:** Call `smart-tests subset` once per test session. For parallel test execution, use the `--bin` option:
-
-```sh
-# Split tests across 4 parallel runners
-smart-tests subset maven --build $BUILD --session $SESSION --bin 1/4 src/test/
-smart-tests subset maven --build $BUILD --session $SESSION --bin 2/4 src/test/
-smart-tests subset maven --build $BUILD --session $SESSION --bin 3/4 src/test/
-smart-tests subset maven --build $BUILD --session $SESSION --bin 4/4 src/test/
-```
-
-### Root Cause D: No Commit History (`NO_COMMIT_HISTORY`)
+### Root Cause C: No Commit History (`NO_COMMIT_HISTORY`)
 
 No commit history was available when recording the build.
 
@@ -285,7 +270,7 @@ checkout([
 ])
 ```
 
-### Root Cause E: Extra Tests Recorded (Observation Mode)
+### Root Cause D: Extra Tests Recorded (Observation Mode)
 
 In observation mode, tests were recorded that were not part of any subset request. This happens when
 additional test suites share the same test session name.
@@ -303,12 +288,14 @@ smart-tests record tests maven --session unit-tests --build $BUILD ...
 smart-tests record tests maven --session integration-tests --build $BUILD ...
 ```
 
-## Output Format
+## Output and CI Fix
 
-Report findings in this structure:
+### Step 1: Report findings
+
+First, present the diagnosis report to the user:
 
 ```
-Root cause:     <Test path mismatch | NO_TESTS_EXECUTED | TOO_MANY_SUBSETTINGS | NO_COMMIT_HISTORY | Extra tests recorded>
+Root cause:     <Test path mismatch | NO_TESTS_EXECUTED | NO_COMMIT_HISTORY | Extra tests recorded>
 
 Evidence:
 - is_new ratio: <X of Y tests are is_new=true>
@@ -317,12 +304,25 @@ Evidence:
 - Mismatch pattern:            <description of the difference>
 
 Suggested fix:
-- <specific CI file change with before/after example>
-
-Verification:
-- After applying the fix, run a new CI build and check the test session in the web app
-- The "Invalid observation session" badge should no longer appear
+- <description of what needs to change>
 ```
+
+### Step 2: Fix CI configuration
+
+After showing the report, if the user's CI configuration files are accessible (e.g., Jenkinsfile, `.github/workflows/*.yml`,
+`.circleci/config.yml`, `screwdriver.yaml`, `buildspec.yml`, etc.), locate the relevant CI file and apply the fix directly.
+
+Look for commands like `smart-tests subset`, `smart-tests record tests`, `launchable subset`, or `launchable record tests`
+in the CI configuration and apply the appropriate fix from Phase 4 above.
+
+After making the change, show the user the diff and explain what was changed and why.
+
+### Step 3: Verification
+
+Tell the user:
+- After merging the CI fix, run a new CI build
+- Check the new test session in the web app
+- The "Invalid observation session" badge should no longer appear
 
 ## References
 
