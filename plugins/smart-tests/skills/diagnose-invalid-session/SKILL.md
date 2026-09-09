@@ -63,7 +63,41 @@ jq --version
 
 ## Phase 1: Gather Context
 
-Collect the following from the user before starting diagnosis:
+### Step 1a: Detect setup from the repository
+
+Before asking the user questions, scan their repository to auto-detect the environment:
+
+**CI system** — check for these files:
+- `.github/workflows/*.yml` / `.github/workflows/*.yaml` → GitHub Actions
+- `Jenkinsfile` / `.jenkins` → Jenkins
+- `.circleci/config.yml` → CircleCI
+- `screwdriver.yaml` / `.screwdriver.yaml` → Screwdriver.cd
+- `buildspec.yml` → AWS CodeBuild
+- `.gitlab-ci.yml` → GitLab CI
+
+**CLI version and test runner** — search CI config files for `smart-tests` or `launchable` commands:
+- `smart-tests subset maven` → v2 CLI, Maven runner
+- `launchable subset gradle` → v1 CLI, Gradle runner
+- Look for `subset`, `record tests`, `record build` commands and their arguments
+
+**Test framework** — check build files:
+- `pom.xml` with `surefire` or `failsafe` → Maven/JUnit
+- `build.gradle` with `test` task → Gradle
+- `pytest.ini` / `setup.cfg` / `pyproject.toml` with pytest config → pytest
+- `cypress.config.*` → Cypress
+
+### Step 1b: Confirm with the user
+
+Present your findings and ask for confirmation:
+
+> Based on your repository, it looks like:
+> - **CI system**: GitHub Actions (`.github/workflows/ci.yml`)
+> - **CLI**: smart-tests v2
+> - **Test runner**: Maven (surefire)
+>
+> Is this correct?
+
+Then ask for the remaining information that cannot be detected from the repo:
 
 ### Test Session ID
 
@@ -85,16 +119,6 @@ smart-tests verify
 Found in one of these places:
 - The output of the `smart-tests subset` command: `Run smart-tests inspect subset --subset-id 26876 to view full subset details`
 - The web app Analyze page: in the "Predictive Test Selection" section, the "in request" number shown in the Request row is the subset ID
-
-### Additional Context
-
-- CLI version: v2 (`smart-tests`) or v1 (`launchable`)?
-- Test runner: Maven, Gradle, pytest, Cypress, raw/JSON, etc.
-- CI system: Jenkins, GitHub Actions, CircleCI, etc.
-- Screenshot of the error (if available) — look for:
-  - "Invalid observation session" badge
-  - "Integration issue found" warning icon
-  - Analyze page showing specific issue descriptions
 
 ## Phase 2: Inspect Subset Request
 
