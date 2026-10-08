@@ -1,7 +1,7 @@
 ---
 name: diagnose-invalid-session
 description: Diagnose "Invalid session" or "Invalid observation session" errors shown in the CloudBees Smart Tests web app. Identifies root causes such as test path mismatches, missing test recordings, or configuration issues, then suggests CI file fixes. Use when a user reports invalid session, invalid observation session, integration issue, unrecorded tests, or test path mismatch.
-compatibility: Requires smart-tests CLI (v2.15.0+) or launchable CLI (v1) authenticated. jq required for parsing CLI output.
+compatibility: Requires smart-tests CLI (v2.16.0+) or launchable CLI (v1) authenticated. jq required for parsing CLI output.
 metadata:
   author: CloudBees
 ---
@@ -33,7 +33,7 @@ The smart-tests CLI (v2) or launchable CLI (v1) must be installed and authentica
 Install (v2):
 
 ```sh
-uv tool install "smart-tests-cli>=2.15" --upgrade
+uv tool install "smart-tests-cli>=2.16" --upgrade
 ```
 
 Verify connectivity:
@@ -99,7 +99,7 @@ Present your findings and ask for confirmation:
 
 Then ask for the remaining information that cannot be detected from the repo:
 
-### Test Session ID
+#### Test Session ID
 
 The numeric ID shown in the web app. Ask the user to copy the URL from their browser — the last numeric segment is the test session ID:
 
@@ -114,11 +114,55 @@ smart-tests verify
 # Output includes: Organization: '...' and Workspace: '...'
 ```
 
-### Subset ID
+### Step 1c: Look up the subset ID
 
-Found in one of these places:
-- The output of the `smart-tests subset` command: `Run smart-tests inspect subset --subset-id 26876 to view full subset details`
-- The web app Analyze page: in the "Predictive Test Selection" section, the "in request" number shown in the Request row is the subset ID
+How to get the subset ID depends on the CLI detected in Step 1a:
+
+- **smart-tests CLI v2.16.0+** → Do not ask the user. Look it up from the test session ID as described below.
+- **v1 CLI or smart-tests CLI older than v2.16.0** → `view subsets` is not available. Ask the user for the subset
+  ID instead. It can be found in:
+  - The output of the `subset` command: `Run smart-tests inspect subset --subset-id 26876 to view full subset details`
+  - The web app Analyze page: in the "Predictive Test Selection" section, the "in request" number shown in the
+    Request row is the subset ID
+
+Look up the subset IDs from the test session ID:
+
+```sh
+smart-tests view subsets --test-session-id <TEST_SESSION_ID>
+```
+
+The output is a JSON array of the subsets requested in the test session, in the order they were requested:
+
+```json
+[
+  {
+    "subsetId": 26876,
+    "testSessionId": 6909578,
+    "createdAt": "2026-10-01T00:00:00Z",
+    "inputTestPathCount": 3,
+    "summary": {
+      "subset": {"candidates": 2, "rate": 98.4, "duration": 1.5, "newTestCount": 1},
+      "rest": {"candidates": 1, "rate": 1.6, "duration": 0.025, "newTestCount": 1}
+    }
+  }
+]
+```
+
+Run the command without piping to `jq` first, so that errors are not hidden: piping turns an error and an empty
+array into the same empty output. Only after it exits successfully, extract the subset IDs:
+
+```sh
+smart-tests view subsets --test-session-id <TEST_SESSION_ID> | jq -r '.[].subsetId'
+```
+
+- **One subset** → Use its `subsetId` in Phase 2.
+- **Multiple subsets** → Run Phase 2 for each `subsetId`.
+- **Empty array (`[]`)** → No subset was requested in this session. Skip Phases 2–3 and go straight to Phase 4;
+  the likely causes are Root Cause B (no tests executed) or Root Cause D (extra tests recorded).
+- **`Test session N not found` (exit code 1)** → The test session ID is wrong or belongs to a different workspace.
+  Ask the user to double-check the URL and the workspace shown by `smart-tests verify`.
+- **Other errors (exit code 1)** → Show the error to the user and resolve it (e.g., authentication via
+  `smart-tests verify`) before continuing.
 
 ## Phase 2: Inspect Subset Request
 
