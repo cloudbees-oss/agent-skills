@@ -22,7 +22,7 @@ This skill uses only the `smart-tests` (v2) or `launchable` (v1) CLI — no data
 |-----------|-------------|
 | **Test path mismatch** | The test paths sent during `subset` differ in format from those sent during `record tests` |
 | **NO_TESTS_EXECUTED** | No test results were recorded for the session |
-| **NO_COMMIT_HISTORY** | No commit history was available when recording the build (PTS v1 only) |
+| **NO_COMMIT_HISTORY** | No commit history was available when recording the build |
 | **Unrecorded subset/remainder tests** | More than 5% of subset or remainder test paths were not found in recorded results |
 | **Extra tests recorded** | More than 5% of recorded tests were not in any subset request (observation mode) |
 
@@ -303,13 +303,14 @@ Also verify:
 
 ### Root Cause C: No Commit History (`NO_COMMIT_HISTORY`)
 
-No commit history was available when recording the build.
+No commit history was available when recording the build. `record build` collects commit history from the
+local clone, so this is typically caused by a shallow Git clone.
 
-**Important:** PTS v2 does not always require commit history. Check the PTS version first. If the user
-is on PTS v2 and sees this error, the root cause may be something else (e.g., test path mismatch) —
-investigate other causes first.
+Commit history is not needed from the CI job itself when commits reach Smart Tests some other way:
 
-For PTS v1, this is typically caused by a shallow Git clone.
+- The workspace uses the GitHub App integration (`smart-tests subset --from-github-actions`).
+- Another job or workflow sends the commits, e.g. a scheduled job that keeps a full clone and runs
+  `smart-tests record commit --source .`.
 
 **Diagnosis:**
 
@@ -319,7 +320,10 @@ smart-tests --log-level audit record build --build $BUILD --source . --dry-run
 
 Look for warnings about missing Git objects or shallow clones.
 
-**Fix (PTS v1 only):**
+**Fix:**
+
+Fetch enough history in the job that runs `record build`. If a full clone is too slow, send commits from a
+separate job with `smart-tests record commit --source .` instead.
 
 GitHub Actions:
 
