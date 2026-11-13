@@ -6,7 +6,7 @@ See [top level README](../../README.md) for installation.
 
 - `expert`: Answer CloudBees Smart Tests product questions using the CLI and product documentation.
 - `assess-adoption-fit`: Assess whether a target project directory is likely to benefit from Smart Tests by checking CI configuration, serial CI duration, reruns/flakiness, and CI frequency.
-- `review-ci-integration`: Review a CI pipeline's Smart Tests CLI integration (GitHub Actions, Jenkins, CircleCI, Screwdriver) before merging, to catch mistakes like missing always-run reporting, shallow clones, and duplicate sessions from reruns.
+- `review-ci-integration`: Review a CI pipeline's Smart Tests CLI integration (GitHub Actions, Jenkins, CircleCI, Screwdriver) before merging, to catch mistakes like missing always-run reporting, shallow clones, session IDs not passed between steps, and unsafe token handling.
 
 ## Usage
 
